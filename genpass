@@ -1,0 +1,113 @@
+import sqlite3
+from hashlib import pbkdf2_hmac
+import os
+import binascii
+
+SALT_LENGTH = 16
+HASH_ITERATIONS = 100000
+HASH_ALGORITHM = 'sha256'
+
+def create_database():
+    """Создаем базу данных и таблицу для хранения паролей"""
+    conn = sqlite3.connect('passwords.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS passwords (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            salt TEXT NOT NULL,
+            password_hash TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def generate_salt():
+    """Генерируем"""
+    return binascii.hexlify(os.urandom(SALT_LENGTH)).decode('utf-8')
+
+def hash_password(password, salt):
+    """Хешируем пароль"""
+    dk = pbkdf2_hmac(
+        HASH_ALGORITHM,
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        HASH_ITERATIONS
+    )
+    return binascii.hexlify(dk).decode('utf-8')
+
+def store_password(username, password):
+    """Сохраняем пароль в базу данных"""
+    salt = generate_salt()
+    password_hash = hash_password(password, salt)
+    
+    try:
+        conn = sqlite3.connect('passwords.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO passwords (username, salt, password_hash)
+            VALUES (?, ?, ?)
+        ''', (username, salt, password_hash))
+        conn.commit()
+        print(f"Пароль для пользователя '{username}' успешно сохранен!")
+    except sqlite3.IntegrityError:
+        print(f"Пользователь '{username}' уже существует!")
+    finally:
+        conn.close()
+
+def verify_password(username, input_password):
+    """Проверяем пароль"""
+    conn = sqlite3.connect('passwords.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT salt, password_hash FROM passwords WHERE username = ?
+    ''', (username,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if not result:
+        print(f"Пользователь '{username}' не найден!")
+        return False
+    
+    salt, stored_hash = result
+    input_hash = hash_password(input_password, salt)
+    
+    if input_hash == stored_hash:
+        print("Пароль верный!")
+        return True
+    else:
+        print("Неверный пароль!")
+        return False
+
+def main():
+    create_database()
+    
+    while True:
+        print("\nМеню:")
+        print("1. Создать нового пользователя")
+        print("2. Проверить пароль")
+        print("3. Выйти")
+        
+        choice = input("Выберите действие: ")
+        
+        if choice == '1':
+            username = input("Введите имя пользователя: ")
+            password = input("Введите пароль: ")
+            store_password(username, password)
+        
+        elif choice == '2':
+            username = input("Введите имя пользователя: ")
+            password = input("Введите пароль: ")
+            verify_password(username, password)
+        
+        elif choice == '3':
+            print("Выход...")
+            break
+        
+        else:
+            print("Неверный выбор, попробуйте снова.")
+
+if __name__ == "__main__":
+    main()
